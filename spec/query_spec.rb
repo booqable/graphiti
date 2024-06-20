@@ -47,7 +47,7 @@ RSpec.describe Graphiti::Query do
         end
       end
 
-      context "when context has sideload allowlist" do
+      context "when context has #sideload_allowlist" do
         let(:ctx) do
           OpenStruct.new(sideload_allowlist: {update: {positions: {}}})
         end
@@ -60,6 +60,22 @@ RSpec.describe Graphiti::Query do
 
         it "removes invalid includes" do
           expect(hash).to eq(include: {positions: {}})
+        end
+      end
+
+      context "when context has #sideload_allowlist with nested resources" do
+        let(:ctx) do
+          OpenStruct.new(sideload_allowlist: {update: {positions: {department: {}}}})
+        end
+
+        around do |e|
+          Graphiti.with_context ctx, :update do
+            e.run
+          end
+        end
+
+        it "correctly constructs include hashes for nested queries" do
+          expect(instance.sideload_hash[:positions]).to eq({:include=>{:department=>{}}})
         end
       end
 

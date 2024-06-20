@@ -2,7 +2,7 @@ module Graphiti
   class Query
     attr_reader :resource, :association_name, :params, :action
 
-    def initialize(resource, params, association_name = nil, nested_include = nil, parents = [], action = nil)
+    def initialize(resource, params, association_name = nil, nested_include = nil, parents = [], action = nil, allowed_sideloads = nil)
       @resource = resource
       @association_name = association_name
       @params = params
@@ -12,6 +12,14 @@ module Graphiti
       @include_param = nested_include || @params[:include]
       @parents = parents
       @action = parse_action(action)
+
+      # The top-level Query takes the allowlist from the context.
+      # Nested queries are passed a subset of the allowlist from their parent.
+      @allowed_sideloads = allowed_sideloads
+      if @allowed_sideloads.nil? && @resource.context&.respond_to?(:sideload_allowlist)
+        allowlist = @resource.context.sideload_allowlist
+        @allowed_sideloads = allowlist[@resource.context_namespace] if allowlist
+      end
     end
 
     def association?
@@ -102,11 +110,15 @@ module Graphiti
             # This way A) ensures sideloads are resolved
             # And B) ensures nested filters, sorts etc still work
             relationship_name = sideload ? sideload.name : key
-            hash[relationship_name] = Query.new sl_resource,
+            hash[relationship_name] = Query.new(
+              sl_resource,
               @params,
-              key,
-              sub_hash,
-              query_parents, :all
+              key, # association_name
+              sub_hash, # nested_include
+              query_parents, # parent
+              :all, # action
+              @allowed_sideloads&.fetch(relationship_name, nil)
+            )
           else
             handle_missing_sideload(key)
           end
@@ -199,14 +211,7 @@ module Graphiti
     def include_hash
       @include_hash ||= begin
         requested = include_directive.to_hash
-
-        allowlist = nil
-        if @resource.context&.respond_to?(:sideload_allowlist)
-          allowlist = @resource.context.sideload_allowlist
-          allowlist = allowlist[@resource.context_namespace] if allowlist
-        end
-
-        allowlist ? Util::IncludeParams.scrub(requested, allowlist) : requested
+        @allowed_sideloads ? Util::IncludeParams.scrub(requested, @allowed_sideloads) : requested
       end
 
       @include_hash
